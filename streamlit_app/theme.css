@@ -1,0 +1,10 @@
+:root{color-scheme:light}html,body,[data-testid="stAppViewContainer"]{background:#f5f7fb;color:#17233b}
+.block-container{max-width:1200px;padding-top:2.5rem;padding-bottom:4rem}h1{letter-spacing:-.045em;font-size:2.5rem!important}h2,h3{letter-spacing:-.025em}
+[data-testid="stSidebar"]{background:#fff;border-right:1px solid #e5eaf2}[data-testid="stSidebar"] .block-container{padding:1.5rem}
+.brand{font-size:25px;color:#1f4bd8;margin:12px 0 34px}.brand small{display:block;font-size:10px;letter-spacing:.17em;color:#8190a8;margin-top:8px}
+.eyebrow{color:#647ea7;font-size:10px;letter-spacing:.18em;font-weight:700;margin-bottom:8px}
+.hero{background:linear-gradient(120deg,#18378c,#365cdb);padding:28px 32px;border-radius:20px;color:white;margin:24px 0}.hero span,.hero small{display:block;color:#d0dcff}.hero strong{display:block;font-size:38px;letter-spacing:-.03em;margin:10px 0}.hero small{font-size:12px}
+.strategy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:24px 0}.strategy-card{border:1px solid #e3e9f2;border-radius:18px;padding:24px;background:#fff;box-shadow:0 4px 18px #20386605}.card-top{display:flex;justify-content:space-between;align-items:center}.card-top h3{margin:0;font-size:19px}.card-top span{font-size:11px;padding:5px 9px;border-radius:20px;background:#eef3ff;color:#496bc6}.strategy-card small{color:#8290a4;font-size:11px}.card-amount{font-size:28px;font-weight:700;letter-spacing:-.03em;margin:20px 0}
+.asset-line{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;border-top:1px solid #eff2f7;padding:13px 0;font-size:13px}.asset-line small{display:block;margin-top:4px}.asset-line b{color:#3a62cc}
+[data-testid="stForm"]{background:white;border:1px solid #e3e9f2;border-radius:16px;padding:20px}button{border-radius:10px!important}[data-baseweb="input"],[data-baseweb="select"]{border-radius:10px}
+@media(max-width:767px){.block-container{padding:1.3rem 1rem}.strategy-grid{grid-template-columns:1fr;gap:14px}.strategy-card{padding:18px}.hero{padding:24px}.hero strong{font-size:30px}.asset-line{gap:8px;font-size:12px}h1{font-size:2rem!important}}
