@@ -111,23 +111,75 @@ def fetch_prices(ticker,market,day):
     s=d['Close'];return s.iloc[:,0] if isinstance(s,pd.DataFrame) else s
 
 
-def search(query,market):
+# Common portfolio ETFs remain discoverable when the remote search service is unavailable.
+BUILTIN_ASSETS=[
+    dict(ticker='QQQ',name='Invesco QQQ Trust',market='US'),
+    dict(ticker='SPY',name='SPDR S&P 500 ETF Trust',market='US'),
+    dict(ticker='SSO',name='ProShares Ultra S&P500',market='US'),
+    dict(ticker='QLD',name='ProShares Ultra QQQ',market='US'),
+    dict(ticker='TQQQ',name='ProShares UltraPro QQQ',market='US'),
+    dict(ticker='360750',name='TIGER 미국S&P500',market='KR'),
+    dict(ticker='069500',name='KODEX 200',market='KR'),
+    dict(ticker='245350',name='TIGER 유로스탁스배당30',market='KR'),
+    dict(ticker='251350',name='KODEX 선진국MSCI World',market='KR'),
+]
+
+def search(query,market,mode='auto'):
+    import re
     import yfinance as yf
     query=query.strip()
     if not query:return []
-    try:quotes=yf.Search(query,max_results=20).quotes
-    except Exception:quotes=[]
-    results=[{'ticker':canonical(q['symbol'],market),'name':q.get('shortname') or q.get('longname') or q['symbol'],'market':market} for q in quotes if q.get('symbol') and market_of(q['symbol'],market)==market]
-    # Korean names often have no Yahoo search hits; FinanceDataReader's KRX listing supports Korean names and six-digit codes.
+    ticker_query=bool(re.fullmatch(r'[A-Za-z][A-Za-z0-9.\-]{0,14}',query)) and mode!='name'
+    if ticker_query:market='US'
+    elif query.isdigit() and mode!='name':market='KR'
+    fallback=[dict(r,source='기본 종목 목록') for r in BUILTIN_ASSETS
+              if r['market']==market and (query.casefold() in r['ticker'].casefold() or query.casefold() in r['name'].casefold())]
+    results=[]
+    errors=[];successful_sources=0
     if market=='KR':
         try:
             import FinanceDataReader as fdr
-            listing=fdr.StockListing('KRX')
-            hits=listing[listing['Name'].astype(str).str.contains(query,case=False,regex=False)|listing['Code'].astype(str).str.contains(query,regex=False)]
-            results=[dict(ticker=str(r.Code).zfill(6),name=r.Name,market='KR') for r in hits.head(20).itertuples()]+results
-        except Exception:pass
-    unique={r['ticker']:r for r in results}
-    return list(unique.values())
+            for listing_name in ['ETF/KR','KRX']:
+                try:
+                    listing=fdr.StockListing(listing_name)
+                    if listing.empty:raise ValueError('empty listing')
+                    code_column='Code' if 'Code' in listing else 'Symbol'
+                    codes=listing[code_column].astype(str).str.replace(r'\.0$','',regex=True).str.zfill(6)
+                    names=listing['Name'].astype(str)
+                    hits=listing.loc[names.str.contains(query,case=False,regex=False)|codes.str.contains(query,regex=False)].copy()
+                    hits['_code']=codes.loc[hits.index]
+                    results += [dict(ticker=r['_code'],name=str(r['Name']),market='KR',source=listing_name) for r in hits.head(20).to_dict('records')]
+                    successful_sources+=1
+                except Exception:errors.append(listing_name+' 목록 조회 실패')
+        except ImportError:errors.append('국내 종목 검색 패키지 설치 누락')
+    else:
+        # Direct symbol lookup is independent of the Yahoo text search endpoint.
+        if ticker_query:
+            try:
+                info=yf.Ticker(query.upper()).info
+                if info.get('shortName') or info.get('longName'):
+                    results.append(dict(ticker=query.upper(),name=info.get('shortName') or info['longName'],market='US',source='티커 정보 조회'))
+                    successful_sources+=1
+            except Exception:errors.append('티커 정보 조회 제한 또는 연결 실패')
+    try:
+        quotes=yf.Search(query,max_results=20,timeout=8).quotes
+        successful_sources+=1
+        results += [dict(ticker=canonical(q['symbol'],market),name=q.get('shortname') or q.get('longname') or q['symbol'],market=market,source='Yahoo 검색')
+                    for q in quotes if q.get('symbol') and market_of(q['symbol'],market)==market]
+    except Exception:errors.append('Yahoo 검색 요청 제한 또는 연결 실패')
+    results += fallback
+    if ticker_query and not any(r['ticker']==query.upper() for r in results):
+        results.append(dict(ticker=query.upper(),name=query.upper(),market='US',source='입력 티커 · 종목 정보 미확인',unverified=True,
+                            search_warning='외부 서비스에서 종목 정보를 확인하지 못했습니다. 입력한 티커로 등록할 수 있지만, 종가 조회 성공을 확인해야 합니다.'))
+    unique={}
+    for r in results:unique.setdefault(r['ticker'],r)
+    output=sorted(unique.values(),key=lambda r:(r['ticker']!=query.upper(),r['ticker']))
+    if not output and errors:
+        raise DataError(' · '.join(errors)+' — 종목이 없다는 뜻은 아닙니다. 다시 검색하거나 티커를 직접 입력하세요.')
+    if errors:
+        for r in output:
+            if not r.get('unverified'):r['search_warning']='일부 검색 서비스 조회에 실패했습니다. 기본 목록 또는 조회에 성공한 결과만 표시합니다.'
+    return output[:40]
 
 
 def clean(s,day):
@@ -168,3 +220,24 @@ def action(h,code,ticker,q,side,day,before,after):
     return dict(date=str(day),saved_at=pd.Timestamp.now(tz='UTC').isoformat(),strategy=code,ticker=ticker,name=r['name'],side=side,
         planned_shares=q if side=='매수' else -q,actual_shares=q,planned_amount=None,done=True,reason='수동 수량 조정',memo=f'{before:g} → {after:g}',
         execution_id=uuid.uuid4().hex,execution_date=str(day),actual_price=None,actual_amount=None,status='완료',currency='USD' if r.market=='US' else 'KRW')
+
+
+def revalue(view,holdings):
+    """Recalculate quantities using the exact quotes already displayed to the user."""
+    h=validate_holdings(holdings)
+    keys=['strategy','ticker']
+    quotes=view.set_index(keys)
+    if any(tuple(r) not in quotes.index for r in h[keys].itertuples(index=False,name=None)):
+        raise DataError('새 종목의 종가를 먼저 조회하세요')
+    v=h.merge(view[keys+['close','fx','sma10','return12','price_date']],on=keys,how='left',validate='one_to_one')
+    v['value']=v.shares*v.close*v.fx;v['weight']=float('nan');v['total_weight']=float('nan')
+    for _,ids in v.groupby('strategy').groups.items():
+        values=v.loc[ids,'value']
+        if values.notna().all():v.loc[ids,'weight']=values/values.sum()*100 if values.sum() else 0.
+    if v.value.notna().all():v['total_weight']=v.value/v.value.sum()*100 if v.value.sum() else 0.
+    return v
+
+
+def category_distribution(view):
+    if view.value.isna().any():raise DataError('모든 종가와 환율을 조회한 뒤 분류별 분포를 확인하세요')
+    return view.groupby('category',as_index=False)['value'].sum().loc[lambda x:x.value>0].sort_values('value',ascending=False)

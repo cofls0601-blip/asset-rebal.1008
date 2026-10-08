@@ -47,4 +47,11 @@ class PortfolioTests(unittest.TestCase):
   v,e=m.valuation(ws()['holdings'],d,daily);self.assertFalse(e);self.assertEqual(v.sma10.iloc[0],107.5)
  def test_backup(self):
   w=ws();w['holdings']=m.add_asset(w['holdings'],'DEMO',{'ticker':'069500','market':'KR'},10,0);r=restore_backup(backup_bytes(w));self.assertEqual(r['holdings'].iloc[-1].ticker,'069500')
+ def test_cached_quote_revaluation_and_category_totals(self):
+  h=ws()['holdings'];h.loc[0,'shares']=10;h.loc[h.ticker.eq('CASH'),'shares']=1000
+  v,e=m.valuation(h,DAY,fetch);updated,_,_=m.adjust(h,'DEMO','360750',5,'매수');r=m.revalue(v,updated)
+  self.assertEqual(r.close.iloc[0],v.close.iloc[0]);self.assertEqual(r.value.iloc[0],15*113)
+  self.assertAlmostEqual(r.weight.iloc[0],1695/2695*100)
+  grouped=m.category_distribution(r);self.assertAlmostEqual(grouped.value.sum(),r.value.sum())
+  self.assertEqual(set(grouped.category),{'선진국 주식','현금'})
 if __name__=='__main__':unittest.main()

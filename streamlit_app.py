@@ -5,6 +5,7 @@ from pathlib import Path
 import hashlib
 import hmac
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from streamlit_app import manual as m
 from streamlit_app.data import DataError, load_default_holdings, load_default_strategies, normalize_strategies, to_csv_bytes, to_tsv
@@ -51,28 +52,39 @@ if connected and not st.session_state.get('loaded'):
 
 @st.cache_data(ttl=900,show_spinner=False)
 def prices(t,market,day):return m.fetch_prices(t,market,day)
-@st.cache_data(ttl=3600,show_spinner=False)
-def find(query,market):return m.search(query,market)
+def find(query,market,mode):return m.search(query,market,mode)
 
 def refresh(day):
     v,errors=m.valuation(st.session_state.holdings,day,prices)
     st.session_state.valued={'date':str(day),'view':v,'errors':errors}
 
-def table(frame):st.dataframe(frame,hide_index=True,use_container_width=True)
+def price_columns(columns):
+    return {c:st.column_config.NumberColumn(format='localized') for c in columns
+            if c in ['종가','10개월 SMA','close','sma10','actual_price','평가액','value','actual_amount','planned_amount']}
+
+def table(frame):
+    st.dataframe(frame,hide_index=True,use_container_width=True,column_config=price_columns(frame.columns))
 def picker(key):
     market=st.selectbox('시장',['KR','US'],format_func=lambda x:'한국 · 원화' if x=='KR' else '미국 · 달러',key=key+'market')
+    mode=st.radio('검색 방식',['티커','종목명'],horizontal=True,key=key+'mode')
     query=st.text_input('티커 또는 종목명 검색',placeholder='예: 360750, TIGER, QQQ',key=key+'query')
-    cachekey=(query.strip(),market)
+    cachekey=(query.strip(),market,mode)
     if st.button('종목 검색',key=key+'search'):
         try:
-            with st.spinner('종목을 검색합니다…'):results=find(query,market) if query.strip() else []
+            with st.spinner('종목을 검색합니다…'):results=find(query,market,'ticker' if mode=='티커' else 'name') if query.strip() else []
             st.session_state[key+'hits']=(cachekey,results)
             st.session_state[key+'choice']=0 if results else -1
             if not results:st.info('검색 결과가 없습니다. 아래에서 티커와 종목명을 직접 입력하세요.')
+        except DataError as e:st.error(str(e));st.session_state[key+'hits']=(cachekey,[])
         except Exception:st.error('검색 서비스에 연결하지 못했습니다. 아래에서 직접 입력하세요.');st.session_state[key+'hits']=(cachekey,[])
     saved=st.session_state.get(key+'hits');results=saved[1] if saved and saved[0]==cachekey else []
-    choice=st.selectbox('검색 결과',list(range(len(results)))+[-1],format_func=lambda i:'티커 직접 입력' if i==-1 else f'{results[i]["ticker"]} · {results[i]["name"]}',key=key+'choice')
-    if choice!=-1:return results[choice]
+    choice=st.selectbox('검색 결과',list(range(len(results)))+[-1],format_func=lambda i:'티커 직접 입력' if i==-1 else f'{results[i]["ticker"]} · {results[i]["name"]}'+(' · 정보 미확인' if results[i].get('unverified') else ''),key=key+'choice')
+    if choice!=-1:
+        asset=results[choice]
+        if asset['market']!=market:st.info('입력한 티커는 미국 종목입니다. 미국·달러 종목으로 등록합니다.' if asset['market']=='US' else '입력한 티커는 국내 종목입니다. 한국·원화 종목으로 등록합니다.')
+        if asset.get('search_warning'):st.warning(asset['search_warning'])
+        if asset.get('source')=='기본 종목 목록':st.caption('기본 종목 목록에서 선택했습니다. 현재 가격과 거래 가능 여부는 종가 조회로 확인하세요.')
+        return asset
     ticker=st.text_input('티커',key=key+'ticker').strip().upper()
     name=st.text_input('종목명',key=key+'name')
     return {'ticker':ticker,'name':name,'market':market}
@@ -107,24 +119,37 @@ if page in ['이번달','리밸런싱','기록']:
 if page=='이번달' and view is not None:
     complete=view.value.notna().all();total=f'{view.value.sum():,.0f}원' if complete else '조회 확인 필요'
     st.markdown(f'<div class="hero"><span>총 평가액 · 원화 환산</span><strong>{total}</strong><small>{view.strategy.nunique()}개 전략 · {day} 기준</small></div>',unsafe_allow_html=True)
+    st.subheader('자산 분류별 분포')
+    if complete:
+        categories=m.category_distribution(view)
+        if categories.empty:st.caption('평가액이 있는 자산이 없습니다.')
+        else:
+            chart=px.pie(categories,names='category',values='value',hole=.55,
+                color_discrete_sequence=['#355CD5','#6D8FF0','#31B4A3','#F4B860','#A18CD1','#E78E9A','#8CABC2'])
+            chart.update_traces(textinfo='percent',textposition='inside',
+                hovertemplate='%{label}<br>%{value:,.0f}원 · %{percent}<extra></extra>')
+            chart.update_layout(height=340,margin=dict(t=15,b=15,l=30,r=30),showlegend=True,
+                paper_bgcolor='rgba(0,0,0,0)',font=dict(color='#17233B',size=14),legend=dict(orientation='h',y=-.05,x=.5,xanchor='center'))
+            st.plotly_chart(chart,use_container_width=True,config={'displayModeBar':False})
+    else:st.caption('모든 종가와 환율 조회를 완료하면 분포를 표시합니다.')
     cards=[]
     for code,sub in view.groupby('strategy',sort=False):
         amount=f'{sub.value.sum():,.0f}원' if sub.value.notna().all() else '조회 확인 필요';lines=[]
         for r in sub.to_dict('records'):
             value='—' if pd.isna(r['value']) else f'{r["value"]:,.0f}원';weight='—' if pd.isna(r['weight']) else f'{r["weight"]:.2f}%'
             lines.append(f'<div class="asset-line"><span>{escape(r["name"])}<small>{escape(r["ticker"])} · {escape(r["price_date"])}</small></span><span>{value}</span><b>{weight}</b></div>')
-        cards.append(f'<article class="strategy-card"><div class="card-top"><h3>{escape(code)}</h3><span>{len(sub)}종목</span></div><small>{escape(str(sub.account.iloc[0]))}</small><div class="card-amount">{amount}</div>{"".join(lines)}</article>')
+        cards.append(f'<article class="strategy-card"><div class="card-top"><h3>{escape(code)}</h3><span>{len(sub)}종목</span></div><small>{escape(str(sub.account.iloc[0]))}</small><div class="card-amount">{amount}</div><div class="asset-head"><span>종목</span><span>평가액</span><span>비중</span></div>{"".join(lines)}</article>')
     st.markdown('<div class="strategy-grid">'+''.join(cards)+'</div>',unsafe_allow_html=True)
 
 elif page=='리밸런싱' and view is not None:
     st.caption('SMA와 수익률: 완료된 월의 비수정 월말 종가 기준. 평가액은 원화 환산, 종가·SMA는 종목의 거래 통화입니다.')
     for code,sub in view.groupby('strategy',sort=False):
         st.subheader(code)
-        shown=sub[['strategy','ticker','name','shares','market','close','value','weight','target_pct','sma10','return12']].copy()
+        shown=sub[['strategy','ticker','name','shares','market','close','sma10','value','weight','target_pct','return12']].copy()
         shown.market=shown.market.map({'KR':'원화','US':'달러'})
-        shown.columns=['전략명','티커','종목명','보유 수량','원화/달러','종가','평가액','현재 비중','목표 비중','10개월 SMA','12개월 수익률']
+        shown.columns=['전략명','티커','종목명','보유 수량','원화/달러','종가','10개월 SMA','평가액','현재 비중','목표 비중','12개월 수익률']
         with st.form('plan'+code+str(st.session_state.revision)):
-            edited=st.data_editor(shown,hide_index=True,use_container_width=True,disabled=[c for c in shown if c!='목표 비중'],column_config={'목표 비중':st.column_config.NumberColumn(min_value=0.,max_value=100.,format='%.2f%%'),'현재 비중':st.column_config.NumberColumn(format='%.2f%%'),'12개월 수익률':st.column_config.NumberColumn(format='%.2f%%')})
+            edited=st.data_editor(shown,hide_index=True,use_container_width=True,disabled=[c for c in shown if c!='목표 비중'],column_config={**price_columns(shown.columns),'목표 비중':st.column_config.NumberColumn(min_value=0.,max_value=100.,format='%.2f%%'),'현재 비중':st.column_config.NumberColumn(format='%.2f%%'),'12개월 수익률':st.column_config.NumberColumn(format='%.2f%%')})
             if st.form_submit_button('목표 비중 적용'):
                 try:
                     values=[m.number(x,'목표비중',100) for x in edited['목표 비중']]
@@ -148,15 +173,30 @@ elif page=='주문안':
         elif sub.empty:st.caption('등록된 종목이 없습니다. 새 종목을 검색해 추가하세요.')
         else:
             ticker=st.selectbox('종목',sub.ticker.tolist(),format_func=lambda t:f'{t} · {sub.loc[sub.ticker.eq(t),"name"].iloc[0]}',key='order_ticker'+code)
-            current=float(sub.loc[sub.ticker.eq(ticker),'shares'].iloc[0]);st.metric('현재 보유 수량',f'{current:,.4f}'.rstrip('0').rstrip('.'))
+            current=float(sub.loc[sub.ticker.eq(ticker),'shares'].iloc[0])
+            quote=view.loc[view.strategy.eq(code)&view.ticker.eq(ticker)] if view is not None else pd.DataFrame()
+            value='—';weight='—'
+            if not quote.empty:
+                r=quote.iloc[0]
+                value='—' if pd.isna(r.value) else f'{r.value:,.0f}원'
+                weight='—' if pd.isna(r.weight) else f'{r.weight:.2f}%'
+            quantity=f'{current:,.4f}'.rstrip('0').rstrip('.')
+            st.markdown(f'<div class="order-summary"><div><small>현재 보유수량</small><b>{quantity}주</b></div><div><small>현재 평가액</small><b>{value}</b></div><div><small>현재 비중 · 전략 내</small><b>{weight}</b></div></div>',unsafe_allow_html=True)
+            if quote.empty:st.caption('종가를 조회하면 평가액과 비중을 표시합니다.')
             with st.form('order_form'+code):
                 q=st.number_input('매매할 수량',min_value=0.,step=1.,format='%.4f')
                 a,b=st.columns(2);buy=a.form_submit_button('매수',use_container_width=True);sell=b.form_submit_button('매도',use_container_width=True)
                 if buy or sell:
                     try:
+                        if quote.empty or pd.isna(quote.iloc[0].close) or pd.isna(quote.iloc[0].fx):
+                            raise DataError('매매를 반영하기 전에 선택한 기준일의 종가를 조회하세요')
                         side='매수' if buy else '매도';updated,before,after=m.adjust(h,code,ticker,q,side)
+                        changed_view=m.revalue(view,updated)
                         log=m.action(updated,code,ticker,q,side,day,before,after)
-                        apply({'holdings':updated,'actions':pd.concat([st.session_state.actions,pd.DataFrame([log])],ignore_index=True)},f'{ticker} {side} {q:g}주 반영 · {before:g} → {after:g}')
+                        install({'holdings':updated,'actions':pd.concat([st.session_state.actions,pd.DataFrame([log])],ignore_index=True)})
+                        st.session_state.valued={'date':str(day),'view':changed_view,'errors':result['errors']}
+                        st.session_state.notice=f'{ticker} {side} {q:g}주 반영 · {before:g} → {after:g} · 조회된 종가로 평가액과 비중을 재계산했습니다.'
+                        st.rerun()
                     except DataError as e:st.error(str(e))
 
 elif page=='기록':
@@ -204,14 +244,14 @@ elif page=='설정':
         else:
             code=st.selectbox('전략',codes,key='asset_strategy');sub=h[h.strategy.eq(code)].copy()
             st.caption('보유수량은 최종 잔고입니다. CASH 수량은 원화 현금 잔액입니다. 후보 종목은 수량 0으로 등록하세요.')
-            labels={'ticker':'티커','name':'종목명','market':'시장','shares':'보유수량','target_pct':'목표비중 (%)'}
+            labels={'ticker':'티커','name':'종목명','market':'시장','category':'자산 분류','shares':'보유수량','target_pct':'목표비중 (%)'}
             shown=sub[list(labels)].rename(columns=labels)
             with st.form('edit_assets'+code+str(st.session_state.revision)):
                 edited=st.data_editor(shown,hide_index=True,use_container_width=True,disabled=['티커','시장'],column_config={'보유수량':st.column_config.NumberColumn(min_value=0.,format='%.4f'),'목표비중 (%)':st.column_config.NumberColumn(min_value=0.,max_value=100.,format='%.2f')})
                 st.caption(f'현재 저장된 목표비중 합계 {sub.target_pct.sum():.2f}% · 합계 100%가 아니어도 작성 중인 계획을 저장할 수 있습니다.')
                 if st.form_submit_button('보유수량·목표비중 적용'):
                     try:
-                        updated=h.copy();updated.loc[sub.index,['name','shares','target_pct']]=edited[['종목명','보유수량','목표비중 (%)']].to_numpy()
+                        updated=h.copy();updated.loc[sub.index,['name','category','shares','target_pct']]=edited[['종목명','자산 분류','보유수량','목표비중 (%)']].to_numpy()
                         st.session_state.demo=False;apply({'holdings':m.validate_holdings(updated)},'수량과 목표비중을 적용했습니다.')
                     except DataError as e:st.error(str(e))
             if abs(sub.target_pct.sum()-100)>.01:st.warning('목표비중 합계가 100%가 아닙니다. 리밸런싱 전에 조정하세요.')

@@ -33,12 +33,19 @@ class UITests(unittest.TestCase):
   self.assertEqual(at.session_state['holdings'].target_pct.iloc[0],40)
   at.selectbox(key='delete_asset_selectDEMO').set_value('069500').run();self.click(at,'종목 삭제');self.assertNotIn('069500',at.session_state['holdings'].ticker.tolist())
  def test_priced_menus_and_order(self):
-  at=self.start();h=at.session_state['holdings'].copy();h.loc[0,'shares']=10;at.session_state['holdings']=h
+  at=self.start();h=at.session_state['holdings'].copy();h.loc[0,'shares']=10;h.loc[h.ticker.eq('CASH'),'shares']=1000;at.session_state['holdings']=h
   day=at.sidebar.date_input[0].value;v,e=m.valuation(h,day,lambda t,m,d:pd.Series([100.],index=[pd.Timestamp(d)]))
   at.session_state['valued']={'date':str(day),'view':v,'errors':e}
   for page in ['이번달','리밸런싱','주문안','기록']:
    at.sidebar.radio[0].set_value(page).run();self.assertFalse(at.exception)
   at.sidebar.radio[0].set_value('주문안').run();at.number_input[0].set_value(2);self.click(at,'매수');self.assertEqual(at.session_state['holdings'].shares.iloc[0],12)
   self.assertEqual(len(at.session_state['actions']),1)
+  updated=at.session_state['valued']['view']
+  self.assertEqual(updated.value.iloc[0],1200)
+  self.assertAlmostEqual(updated.weight.iloc[0],1200/2200*100)
+  self.assertEqual(updated.close.iloc[0],100)
+  at.sidebar.radio[0].set_value('리밸런싱').run()
+  self.assertEqual(list(at.dataframe[0].value.columns)[5:7],['종가','10개월 SMA'])
+  at.sidebar.radio[0].set_value('이번달').run();self.assertFalse(at.exception)
 
 if __name__=='__main__':unittest.main()
