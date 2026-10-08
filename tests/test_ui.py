@@ -45,7 +45,7 @@ class UITests(unittest.TestCase):
   self.assertAlmostEqual(updated.weight.iloc[0],1200/2200*100)
   self.assertEqual(updated.close.iloc[0],100)
   at.sidebar.radio[0].set_value('리밸런싱').run()
-  self.assertEqual(list(at.dataframe[0].value.columns)[5:7],['종가','10개월 SMA'])
+  self.assertEqual(list(at.dataframe[0].value.columns),['티커','종목명','현재 비중','목표 비중'])
   at.sidebar.radio[0].set_value('이번달').run();self.assertFalse(at.exception)
 
 if __name__=='__main__':unittest.main()

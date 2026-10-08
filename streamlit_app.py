@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from streamlit_app import manual as m
+from streamlit_app.tables import portfolio_table, weight_html
 from streamlit_app.data import DataError, load_default_holdings, load_default_strategies, normalize_strategies, to_csv_bytes, to_tsv
 from streamlit_app.ledger import TABLES, empty_workspace, backup_bytes, restore_backup, parse_table
 from streamlit_app.sheets_sync import load_workspace, save_workspace
@@ -119,37 +120,44 @@ if page in ['이번달','리밸런싱','기록']:
 if page=='이번달' and view is not None:
     complete=view.value.notna().all();total=f'{view.value.sum():,.0f}원' if complete else '조회 확인 필요'
     st.markdown(f'<div class="hero"><span>총 평가액 · 원화 환산</span><strong>{total}</strong><small>{view.strategy.nunique()}개 전략 · {day} 기준</small></div>',unsafe_allow_html=True)
-    st.subheader('자산 분류별 분포')
+    st.subheader('자산군 분포')
     if complete:
         categories=m.category_distribution(view)
         if categories.empty:st.caption('평가액이 있는 자산이 없습니다.')
         else:
-            chart=px.pie(categories,names='category',values='value',hole=.55,
-                color_discrete_sequence=['#355CD5','#6D8FF0','#31B4A3','#F4B860','#A18CD1','#E78E9A','#8CABC2'])
+            chart=px.pie(categories,names='category',values='value',hole=.74,
+                color_discrete_sequence=['#3567E8','#32999D','#9B76CE','#B7C6DA','#F4B860','#E78E9A','#8CABC2'])
             chart.update_traces(textinfo='percent',textposition='inside',
                 hovertemplate='%{label}<br>%{value:,.0f}원 · %{percent}<extra></extra>')
             chart.update_layout(height=340,margin=dict(t=15,b=15,l=30,r=30),showlegend=True,
                 paper_bgcolor='rgba(0,0,0,0)',font=dict(color='#17233B',size=14),legend=dict(orientation='h',y=-.05,x=.5,xanchor='center'))
-            st.plotly_chart(chart,use_container_width=True,config={'displayModeBar':False})
+            with st.container(border=True):
+                st.plotly_chart(chart,use_container_width=True,config={'displayModeBar':False})
     else:st.caption('모든 종가와 환율 조회를 완료하면 분포를 표시합니다.')
+    st.subheader('전략별 자산')
+    st.caption('현재 비중: 🔴 목표 초과 · 🟢 목표와 같음 · 🔵 목표 미달 (소수점 둘째 자리 기준)')
     cards=[]
     for code,sub in view.groupby('strategy',sort=False):
         amount=f'{sub.value.sum():,.0f}원' if sub.value.notna().all() else '조회 확인 필요';lines=[]
         for r in sub.to_dict('records'):
-            value='—' if pd.isna(r['value']) else f'{r["value"]:,.0f}원';weight='—' if pd.isna(r['weight']) else f'{r["weight"]:.2f}%'
+            value='—' if pd.isna(r['value']) else f'{r["value"]:,.0f}원';weight='—' if pd.isna(r['weight']) else weight_html(r['weight'],r['target_pct'])
             lines.append(f'<div class="asset-line"><span>{escape(r["name"])}<small>{escape(r["ticker"])} · {escape(r["price_date"])}</small></span><span>{value}</span><b>{weight}</b></div>')
         cards.append(f'<article class="strategy-card"><div class="card-top"><h3>{escape(code)}</h3><span>{len(sub)}종목</span></div><small>{escape(str(sub.account.iloc[0]))}</small><div class="card-amount">{amount}</div><div class="asset-head"><span>종목</span><span>평가액</span><span>비중</span></div>{"".join(lines)}</article>')
     st.markdown('<div class="strategy-grid">'+''.join(cards)+'</div>',unsafe_allow_html=True)
 
 elif page=='리밸런싱' and view is not None:
+    st.caption('현재 비중: 🔴 목표 초과 · 🟢 목표와 같음 · 🔵 목표 미달 (소수점 둘째 자리 기준)')
     st.caption('SMA와 수익률: 완료된 월의 비수정 월말 종가 기준. 평가액은 원화 환산, 종가·SMA는 종목의 거래 통화입니다.')
     for code,sub in view.groupby('strategy',sort=False):
         st.subheader(code)
         shown=sub[['strategy','ticker','name','shares','market','close','sma10','value','weight','target_pct','return12']].copy()
         shown.market=shown.market.map({'KR':'원화','US':'달러'})
         shown.columns=['전략명','티커','종목명','보유 수량','원화/달러','종가','10개월 SMA','평가액','현재 비중','목표 비중','12개월 수익률']
+        st.markdown(portfolio_table(sub),unsafe_allow_html=True)
+        st.caption('목표 비중 편집 · 현재 비중과 비교하며 입력하세요.')
+        target_editor=shown[['티커','종목명','현재 비중','목표 비중']].copy()
         with st.form('plan'+code+str(st.session_state.revision)):
-            edited=st.data_editor(shown,hide_index=True,use_container_width=True,disabled=[c for c in shown if c!='목표 비중'],column_config={**price_columns(shown.columns),'목표 비중':st.column_config.NumberColumn(min_value=0.,max_value=100.,format='%.2f%%'),'현재 비중':st.column_config.NumberColumn(format='%.2f%%'),'12개월 수익률':st.column_config.NumberColumn(format='%.2f%%')})
+            edited=st.data_editor(target_editor,hide_index=True,use_container_width=True,disabled=['티커','종목명','현재 비중'],column_config={**price_columns(target_editor.columns),'목표 비중':st.column_config.NumberColumn(min_value=0.,max_value=100.,format='%.2f%%'),'현재 비중':st.column_config.NumberColumn(format='%.2f%%'),'12개월 수익률':st.column_config.NumberColumn(format='%.2f%%')})
             if st.form_submit_button('목표 비중 적용'):
                 try:
                     values=[m.number(x,'목표비중',100) for x in edited['목표 비중']]
@@ -179,7 +187,7 @@ elif page=='주문안':
             if not quote.empty:
                 r=quote.iloc[0]
                 value='—' if pd.isna(r.value) else f'{r.value:,.0f}원'
-                weight='—' if pd.isna(r.weight) else f'{r.weight:.2f}%'
+                weight='—' if pd.isna(r.weight) else weight_html(r.weight,r.target_pct)
             quantity=f'{current:,.4f}'.rstrip('0').rstrip('.')
             st.markdown(f'<div class="order-summary"><div><small>현재 보유수량</small><b>{quantity}주</b></div><div><small>현재 평가액</small><b>{value}</b></div><div><small>현재 비중 · 전략 내</small><b>{weight}</b></div></div>',unsafe_allow_html=True)
             if quote.empty:st.caption('종가를 조회하면 평가액과 비중을 표시합니다.')
