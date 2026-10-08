@@ -21,6 +21,8 @@ def weight_html(current, target):
 
 def portfolio_table(view):
     headers=['전략명','티커','종목명','보유 수량','원화/달러','종가','10개월 SMA','평가액','현재 비중','목표 비중','12개월 수익률']
+    widths=[5,6,14,8,6,10,10,14,8,8,11]
+    columns='<colgroup>'+''.join(f'<col style="width:{width}%">' for width in widths)+'</colgroup>'
     rows=[];cards=[]
     for r in view.to_dict('records'):
         name=escape(str(r['name']));ticker=escape(str(r['ticker']));code=escape(str(r['strategy']))
@@ -33,4 +35,4 @@ def portfolio_table(view):
         rows.append('<tr>'+''.join(f'<td class="{"numeric" if i>=3 and i!=4 else ""}">{v}</td>' for i,v in enumerate(values))+'</tr>')
         fields=[('보유수량',qty+'주'),('통화',currency),('종가',num(r['close'],price_digits)),('10개월 SMA',num(r['sma10'],price_digits)),('현재 비중',weight),('목표 비중',num(r['target_pct'],2,'%')),('12개월 수익률',num(gain,2,'%'))]
         cards.append(f'<article class="holding-detail"><div class="detail-head"><div><b>{name}</b><small>{ticker} · {code}</small></div><div class="detail-value"><small>평가액</small><b>{num(r["value"],0)}원</b></div></div><dl>'+''.join(f'<div><dt>{label}</dt><dd>{value}</dd></div>' for label,value in fields)+'</dl></article>')
-    return '<div class="portfolio-desktop"><div class="portfolio-table-scroll"><table class="portfolio-table"><thead><tr>'+''.join(f'<th class="{"numeric" if i>=3 and i!=4 else ""}">{h}</th>' for i,h in enumerate(headers))+'</tr></thead><tbody>'+''.join(rows)+'</tbody></table></div><div class="table-footnote">평가액은 원화 환산 · 종가와 SMA는 표시 통화 기준 · 목표 비중은 아래에서 수정</div></div><div class="portfolio-mobile">'+''.join(cards)+'</div>'
+    return '<div class="portfolio-desktop"><div class="portfolio-table-scroll"><table class="portfolio-table">'+columns+'<thead><tr>'+''.join(f'<th class="{"numeric" if i>=3 and i!=4 else ""}">{h}</th>' for i,h in enumerate(headers))+'</tr></thead><tbody>'+''.join(rows)+'</tbody></table></div><div class="table-footnote">평가액은 원화 환산 · 종가와 SMA는 표시 통화 기준 · 목표 비중은 아래에서 수정</div></div><div class="portfolio-mobile">'+''.join(cards)+'</div>'

@@ -130,7 +130,7 @@ if page=='이번달' and view is not None:
             chart.update_traces(textinfo='percent',textposition='inside',
                 hovertemplate='%{label}<br>%{value:,.0f}원 · %{percent}<extra></extra>')
             chart.update_layout(height=340,margin=dict(t=15,b=15,l=30,r=30),showlegend=True,
-                paper_bgcolor='rgba(0,0,0,0)',font=dict(color='#17233B',size=14),legend=dict(orientation='h',y=-.05,x=.5,xanchor='center'))
+                paper_bgcolor='rgba(0,0,0,0)',font=dict(family='Pretendard, sans-serif',color='#1C2E49',size=14),legend=dict(orientation='h',y=-.05,x=.5,xanchor='center'))
             with st.container(border=True):
                 st.plotly_chart(chart,use_container_width=True,config={'displayModeBar':False})
     else:st.caption('모든 종가와 환율 조회를 완료하면 분포를 표시합니다.')
